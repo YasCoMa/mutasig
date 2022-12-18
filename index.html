@@ -1,0 +1,206 @@
+<html>
+
+    <head>
+    
+        <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"> </script>
+        <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-vis"></script>
+        
+        <style>
+            .code{
+                padding: 15px;
+                border: 1px dashed #000;
+                margin: 10px;
+                max-width: 80%;
+            }
+            a{
+                font-color: blue;
+                text-decoration: none;
+            }
+        </style>
+    </head>
+    
+    <body>
+        <div style="width: 60%">
+        
+            <h1> Tensorflow model to classify mutational signatures </h1>
+            
+            <p> Mutational signatures are a group of frequency patterns of single nucleotide variants that occur along the genome. Each group has been associated to a common etiology of cancer in specific tissues. These groups accounts for endogenous (internal cellular processes) or exogenous (exposure to radiation, smoking) causes. </p>
+            
+            <p> In this notebook, the goal is to check whether a deep learning model may reproduce the same mutational signatures classes predicted by probabilistic models such as <a href="https://github.com/AlexandrovLab/SigProfilerExtractor" target="_blank"> SigProfiler </a>. These methods take a long time to execute and generate the results and the time may increase according to the number of samples and combinations of signatures in the experiment. The machine learning approach could accelerate the execution and also turn the process scalable. The ML approach also could allow the calibration of the model according to samples covariates, since some of the signatures are correlated to age, for example. </p>
+            
+            <h4> About the mutational signatures data and values </h4>
+            <p> Mutational signatures prediction can be derived from two main types of features table: dinucleotide (AC>CA) or single nucleotide (A[C>A]A) bases, these tables are mutational matrices, in which the rows correspond to the variants found in the VCF or MAF files of the samples, and each column accounts for the individual/sample. Here, I am using the Single Base Substitution that generates 96 combinations of base variation (SBS). All the possible classes that these features may have according to the type of cancer and tissues are found in <a href="https://cancer.sanger.ac.uk/signatures/sbs/">COSMIC</a>, but usually there are up to 10 main signatures in an experiment. </p>
+            
+            In this notebook, the matrix file was ready to use given in the SigProfiler repository. But in case you need to generate from the variant calling methods, you may use VCF or MAF files. There are open vcf and maf files in TCGA for projects of diverse types of cancer. The code below is an example of matrix generation from maf files downloaded for the cases in the <a href="https://portal.gdc.cancer.gov/repository?filters=%7B%22op%22%3A%22and%22%2C%22content%22%3A%5B%7B%22content%22%3A%7B%22field%22%3A%22cases.project.project_id%22%2C%22value%22%3A%5B%22TCGA-OV%22%5D%7D%2C%22op%22%3A%22in%22%7D%2C%7B%22op%22%3A%22in%22%2C%22content%22%3A%7B%22field%22%3A%22files.access%22%2C%22value%22%3A%5B%22open%22%5D%7D%7D%2C%7B%22content%22%3A%7B%22field%22%3A%22files.data_category%22%2C%22value%22%3A%5B%22Simple%20Nucleotide%20Variation%22%5D%7D%2C%22op%22%3A%22in%22%7D%2C%7B%22op%22%3A%22in%22%2C%22content%22%3A%7B%22field%22%3A%22files.data_format%22%2C%22value%22%3A%5B%22maf%22%5D%7D%7D%5D%7D&searchTableTab=cases" > TCGA-OV project </a> using the <a href="https://docs.gdc.cancer.gov/API/Users_Guide/Search_and_Retrieval/" > TCGA API </a> .
+            <br />
+            <div class="code">
+                <code>
+                # In case you need to install another genome build version: <br /> 
+                from SigProfilerMatrixGenerator import install as genInstall <br />
+                genInstall.install('GRCh38', rsync=False, bash=True) <br /> <br /> 
+                
+                # To generate the matrix
+                from SigProfilerMatrixGenerator.scripts import SigProfilerMatrixGeneratorFunc as matGen <br />
+                project="TCGA-OV"
+                buildGen="GRCh38"
+                folderMaf="mafs_tcga-ov"
+                matrices = matGen.SigProfilerMatrixGeneratorFunc(project, buildGen, folderMaf, exome=False, bed_file=None, chrom_based=False, plot=False, tsb_stat=False, seqInfo=False)
+                </code>
+            </div>
+            
+            The main input fields here are the label of the project, the version of the reference genome and the path to the folder with your MAF files. You may choose plotting some useful statistics summarized.
+            <br />
+            
+            <p> 
+            
+            In order to obtain the control labels to train our model, the SigProfiler tool that is part of the tools package recommended by COSMIC. Their tools package contains a version for Python and for R. Since the preprocessing of the matrix was made in Python, I used the Python version. But there are other mutational signatures extraction methods, mainly in R (MutationalPatterns, MutSignatures, Mix-MMM (Python) ). To create the labels with this method, I used the mutational <a href="https://github.com/AlexandrovLab/SigProfilerExtractor/blob/master/SigProfilerExtractor/data/TextInput/Samples_SBS.txt"> matrix in the original format </a> given as example in the SigProfiler repository. The method is very simple to use, it takes two command lines (it requires you to enter in the Python interpreter console mode, just type python3 in terminal):
+            <br />
+            
+            <div class="code">
+                <code>
+                from SigProfilerExtractor import sigpro as sig <br />
+                sig.sigProfilerExtractor("matrix", "results_sample", "samples_matrix.tsv", reference_genome="GRCh37", minimum_signatures=1, maximum_signatures=10, nmf_replicates=100, cpu=-1)
+                </code>
+            </div>
+            
+            In this code, "matrix" means the type of input format we are working with that is the mutational matrix, "results_sample" is the name of the results folder where the predictions for COSMIC and De Novo methods will be saved, and then specify the human genome build and the range of signatures (1 to 10) that will be tested in 100 interactions (nmf_replicates). This method returns a lot of files as results, but the most important ones are the tables for the COSMIC (results_sample/SBS96/Suggested_Solution/COSMIC_SBS96_Decomposed_Solution/Activities/COSMIC_SBS96_Activities.txt) and De Novo (results_sample/SBS96/Suggested_Solution/SBS96_De-Novo_Solution/Activities/SBS96_De-Novo_Activities_refit.txt) classes, in which the rows are the samples and each column is a distinct COSMIC or De Novo class, the numbers represent the intensity of the relationshiip among a sample to a certain class. The label with the highest number was chosen to be the label for the sample.
+            <br />
+            
+            </p>
+            
+            <h4> Formatting the data for Deep Learning </h4>
+            <p>
+            These matrices in the mentioned configuration are used by the published profilers to obtain the most probable signatures for each sample, they may use a De Novo or the <a href="https://cancer.sanger.ac.uk/signatures/downloads/"> COSMIC computed frequencies </a> for each SBS according to the specific genome build. Since in this machine learning experiment, we are interested in attribute a class for each sample, the first step to process the mutational matrix is transpose the original matrix, then each row turns into a sample having 96 numerical features as columns (See code below). 
+            <br />
+            <div class="code">
+                <code>
+                # Loading pandas library to deal with dataFrames and perform matrix operations <br /> 
+                import pandas as pd <br /> <br /> 
+                
+                # Loading the mutational matrix <br />
+                df=pd.read_csv('sample_matrix.tsv', sep='\t') <br /> <br /> 
+                
+                # Extracting the values as a 2D-array, removing the index and the column names <br />
+                X=df.values <br /> <br /> 
+                
+                # Removing the variant names column since it will not be used  <br />
+                X=X[:, 1:] <br /> <br /> 
+                
+                # Transposing the data matrix (rows now are samples, and columns are the 96 SBS features) <br />
+                X=X.T <br />
+                </code>
+            </div>
+            
+            For this example, the labels returned by the SIgProfiler were SBS13, SBS3 and SBS40. This classes means that in some samples the cause may be defective homologous recombination-based DNA damage repair (SBS3), in other samples the etiology is enzyme activity alterations caused by mutations in the APOBEC enzymes (SBS13), and finally the last type observed is the SBS40, which does not have etiology description in COSMIC, but it is correlated to patient's age in some types of cancer. This clearly characterizes a multi-class prediction problem, since we may have up to 3 classes that will be distributed in the samples. We also need to preprocess these cateogrical labels to turn them into integer numbers (SBS3 -> 0, SBS13 -> 1, SBS40 -> 2) (see code below). In this code we will prepare the json file containing the X and Y for train and test, as well as the class names.
+            <div class="code">
+                <code>
+                # Loading pandas library to deal with dataFrames and perform matrix operations <br />
+                import pandas as pd <br /> <br /> 
+                
+                # Loading the labels table <br />
+                df=pd.read_csv('sample_cosmic_labels.tsv', sep='\t') <br /> <br /> 
+                
+                # Getting the signatures column <br />
+                Y=df['best_signature'] <br /> <br /> 
+                
+                # Getting the labels without repetition
+                cls=[]
+                for y in Y:
+                    if(not y in cls):
+                        cls.append(y) <br /> 
+                        
+                # loading the label encoder from scikit-learn <br /> 
+                from sklearn.preprocessing import LabelEncoder <br />    <br /> 
+                  
+                # inititalizing LabelEncoder <br /> 
+                encoder = LabelEncoder() <br />  <br /> 
+                
+                # Fitting the labels <br /> 
+                encoder.fit(Y) <br />  <br /> 
+                
+                # Transforming each category into integer values <br /> 
+                encoded_Y = encoder.transform(Y) <br />  <br /> 
+                
+                # Loading train_test_split <br /> 
+                from sklearn.model_selection import train_test_split  <br />    <br /> 
+                
+                # Slice original data into train/test parts, following the rule 2/3 for train and 1/3 for test  <br />  
+                X_train, X_test, y_train, y_test = train_test_split(X, encoded_Y, test_size=0.33, random_state=42) <br />  <br /> 
+                
+                # Representing data as dictionary  <br />  
+                sample_data={'x_train': X_train.tolist(), 'y_train': y_train.tolist(), 'x_test': X_test.tolist(), 'y_test': y_test.tolist(), 'classNames': cls } <br />  <br /> 
+                
+                # Loading json library <br /> 
+                import json <br />  <br /> 
+                
+                # Saving the data into json <br />
+                with open('sample_model/data.json', 'w') as f: <br /> 
+                    json.dump(sample_data, f) <br />  <br /> 
+                        
+                </code>
+            </div>
+            
+            The processed <a href="https://ypublish.info/portfolio-data/mutation_signature/sample_model/data.json">json file</a> may now be retrieved by tensorflow JS. 
+            
+            </p>
+            
+            <h4> Designing DL model, training and evaluation </h4>
+            <p>
+                I developed a javascript model (MutaSig) that handles the data loading, the model generation and compilation, the training and the renderization of the evaluation visualization plots. The full script is <a href="mutasig.js">here</a>. I will just put on the snippets calling them here to keep the text clean. The first step is loading the data from the json we created before, the snippet will feed the x_train, x_test, y_train and y_test attributes of the module object transforming the data into tensors, it will also fill the classNames that will be used later to illustrate the confusion matrix:
+                <div class="code">
+                <code>
+                    # initialization of mutasig object <br /> 
+                    mutasig={ classNames: [], x_train: {}, x_test: [], y_train: [], y_test: [], model: {}, epochLogs: [] } <br /> <br />  
+                    
+                    # Loading the data <br /> 
+                    await mutasig.loadData('http://127.0.0.1/portfolio-data/mutation_signature/sample_model/data.json') <br /> 
+                </code>
+                </div>
+                
+                The next step is creating the neural network model ( <b>mutasig.loadModel();</b> ). The input shape has 96 columns, and the first Dense layer will have 128 units and the activation function is the Rectified Linear Unit (ReLU), the second layer will have 256 units and also uses ReLU and the final layer will deliver the prediction and the number of units is given by the number of classes we want to predict. The activation function of the last layer is softmax and this function also compiles the model using the Adam optimizer and sparseCategoricalCrossentropy to compute the loss and it uses the accuracy to minimize along the epochs. The configured model using tensorflowjs has the following architecture, and can be accessed by <b>mutasig.model.summary();</b>:
+                <div style="text-align: center" >
+                    <img src="model_tfjs.png"  />
+                </div>
+                <br />
+                
+                Once having the data and the model, we can train it and tensorflow js offers a visualization panel interact and see in real time what is happening while training the model. Firstly we instantiate the panel (<b>tfvis.visor();</b>), then I call the training function in mutasig (<b> mutasig.train_visualization(); </b>) with the parameters of the callback that will receive the partial results of the epoch and plot point by point. The function <b>mutasig.train()</b> fits the model in 50 epochs, using a batch size of 32, and shuffle the data samples. It will plot a line chart that shows the accuracy value along the epochs when some epoch ends. It will render the training chart using the title "Training Visualization" in the Training tab of the visualization panel.
+                <br />
+                
+                After training the model we may use the test dataset to perform some predictions. The function <b>mutasig.doPrediction();</b> returns the true labels of the test dataset and computes the predicted labels, returning both arrays. And the function <b>mutasig.showAccuracy();</b> renders a table containing the accuracy for each class and the number of samples representing this class. Finally, the function <b>mutasig.showConfusion();</b> shows a confusion matrix (3x3) comparing the number of samples that were correctly classified (main diagonal) and those that were classified in other class.
+                
+            </p>
+            
+            <h4> Results interpretation </h4>
+            <p>
+                The sample data used in this experiment had a lot of dataset issues for a model, it contains only 21 samples, so 14 of them were split for training and 7 for testing. The second issue is that the classes were not balanced: two samples were classified as SBS13, seven samples had the class SBS3 and SBS40 was assigned to 12 samples. These two issues are sevee in any context of ML application. But even considering these conditions some rounds of execution and prediction returns an accuracy value of 80%. The experimentation with all the samples of real TCGA projects may help to better calibrate and enhance this model.
+            </p>
+            
+            <p> 
+            <b>References:</b> <br />
+            Mix-MMM - https://genomemedicine.biomedcentral.com/articles/10.1186/s13073-021-00988-7 <br />
+            MutationalPatterns - https://genomemedicine.biomedcentral.com/articles/10.1186/s13073-018-0539-0 <br />
+            MutSignatures - https://www.nature.com/articles/s41598-020-75062-0 <br />
+            </p>
+        
+        </div>
+        
+        <script src="mutasig.js"></script>
+        
+        <script>
+            //tfvis.visor();
+            //tfvis.visor().surface({name: 'Performance Visualization', tab: 'Input Data'});
+            
+            async function  init () {
+                tfvis.visor();
+                await mutasig.loadData('http://127.0.0.1/portfolio-data/mutation_signature/sample_model/data.json')
+                mutasig.loadModel();
+                await mutasig.train_visualization();
+                await mutasig.showAccuracy();
+                await mutasig.showConfusion();
+            }
+            
+            init();
+        </script>
+    </body>
+
+</html>
